@@ -1,0 +1,65 @@
+# pane-pwd - show each pane's working directory on its pane border.
+#
+# Herdr draws a pane's manual label on its split border, so the plugin keeps
+# every pane's label in sync with that pane's live `foreground_cwd` (falling
+# back to the pane's own `cwd`). Nothing is written into the pane itself, so
+# an agent running in the pane never sees it.
+#
+# Herdr has no "the working directory changed" event, so a small detached
+# daemon polls `herdr pane list` on an interval. The startup hook only spawns
+# that daemon and exits, which keeps it a one-shot initializer as documented.
+# The event hooks below are pure latency reduction: a freshly split or moved
+# pane gets labelled immediately instead of on the next poll tick.
+
+id = "pane-pwd"
+name = "Pane PWD"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Show each pane's current working directory on its pane border."
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["sh", "scripts/run.sh", "start"]
+
+[[actions]]
+id = "sync"
+title = "Sync pane directory labels"
+description = "Relabel every pane from its live working directory, once."
+contexts = ["global"]
+command = ["sh", "scripts/run.sh", "sync"]
+
+[[actions]]
+id = "start"
+title = "Start pane directory labels"
+description = "Start (or restart) the background watcher that keeps labels current."
+contexts = ["global"]
+command = ["sh", "scripts/run.sh", "start", "--force"]
+
+[[actions]]
+id = "stop"
+title = "Stop pane directory labels"
+description = "Stop the watcher and clear every label this plugin set."
+contexts = ["global"]
+command = ["sh", "scripts/run.sh", "stop"]
+
+[[actions]]
+id = "status"
+title = "Pane directory label status"
+description = "Print watcher state, resolved config, and owned labels as JSON."
+contexts = ["global"]
+command = ["sh", "scripts/run.sh", "status"]
+
+# Catch-up hooks: relabel immediately on layout changes rather than waiting
+# for the next poll. Each one is a single reconciliation over the live pane
+# list; the event payload is deliberately ignored.
+[[events]]
+on = "pane.created"
+command = ["sh", "scripts/run.sh", "sync"]
+
+[[events]]
+on = "pane.moved"
+command = ["sh", "scripts/run.sh", "sync"]
+
+[[events]]
+on = "pane.focused"
+command = ["sh", "scripts/run.sh", "sync"]

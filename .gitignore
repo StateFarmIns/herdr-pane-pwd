@@ -1,0 +1,12 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Plugin runtime state and user config. Herdr normally supplies
+# HERDR_PLUGIN_STATE_DIR and HERDR_PLUGIN_CONFIG_DIR, but when it does not the
+# plugin falls back to writing these under the checkout. They hold the pane
+# labels this plugin owns, which are real directory paths from your machine.
+.local/
+
+# macOS
+.DS_Store
