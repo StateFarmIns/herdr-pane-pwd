@@ -151,6 +151,9 @@ herdr plugin action invoke pane-pwd.start
 | `STYLE` | `short` | Every pane: `basename`, `repo`, `short`, or `full`. |
 | `FOCUSED_STYLE` | `short` | Same choices, for the focused pane only. |
 | `MAX_LEN` | `40` | Label cap; longer labels elide from the left with `…`. |
+| `BRANCH` | `off` | Git branch after the path: `off`, `on`, or `focused`. |
+| `BRANCH_FORMAT` | ` ({branch})` | How the branch is appended; `{branch}` is the name. |
+| `BRANCH_MAX_LEN` | `20` | Branch cap; longer names elide from the right with `…`. |
 | `PREFIX` | *(empty)* | Literal text in front of every label. |
 | `HOME_LABEL` | `~` | How `$HOME` itself renders. |
 | `RESPECT_MANUAL` | `true` | Leave hand-renamed panes alone. |
@@ -172,6 +175,26 @@ The styles, for `/Users/you/dev/herder-plugins/pwd` inside the
 | `basename` | `pwd` |
 | `repo` | `herder-plugins/pwd` |
 | `full` | `/Users/you/dev/herder-plugins/pwd` |
+
+### Git branch
+
+`BRANCH=on` appends the checked-out branch to every label, and
+`BRANCH=focused` only to the focused pane's. It is read from `.git/HEAD`
+directly, worktrees and submodules included, so it adds no `git` process per
+pane per tick. A detached HEAD shows the 7-character commit hash.
+
+```
+BRANCH=on
+MAX_LEN=40
+BRANCH_MAX_LEN=20
+# on feature/ABC-1234-add-login:
+# → …rder-plugins/pwd (feature/ABC-1234-ad…)
+```
+
+The branch is cut from the right, keeping the part that identifies it. It
+counts toward `MAX_LEN`, so a long branch shortens the path rather than
+growing the label; the path keeps at least 8 characters before the branch is
+cut further to fit.
 
 Any key can also be set per-invocation as `HERDR_PANE_PWD_<KEY>`.
 

@@ -131,6 +131,98 @@ class TestRendering(Harness):
         self.assertEqual(self.calls(), [["w1:p1", "beta"]])
 
 
+class TestBranch(Harness):
+    def make_repo(self, head, name="myrepo"):
+        repo = Path(self.tmp.name) / name
+        (repo / ".git").mkdir(parents=True)
+        (repo / ".git" / "HEAD").write_text(head + "\n")
+        return repo
+
+    def test_branch_is_off_by_default(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync()
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo"]])
+
+    def test_branch_on_appends_the_branch(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on")
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo (main)"]])
+
+    def test_branch_focused_only_labels_the_focused_pane(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo), focused=True),
+                        pane("w1:p2", str(repo))])
+        self.sync(branch="focused")
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo (main)"], ["w1:p2", "myrepo"]])
+
+    def test_detached_head_shows_a_short_hash(self):
+        repo = self.make_repo("0123456789abcdef0123456789abcdef01234567")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on")
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo (0123456)"]])
+
+    def test_worktree_gitdir_file_is_followed(self):
+        real = Path(self.tmp.name) / "main-checkout" / ".git" / "worktrees" / "wt"
+        real.mkdir(parents=True)
+        (real / "HEAD").write_text("ref: refs/heads/feature/x\n")
+        wt = Path(self.tmp.name) / "wt"
+        wt.mkdir()
+        (wt / ".git").write_text("gitdir: %s\n" % real)
+        self.set_panes([pane("w1:p1", str(wt))])
+        self.sync(branch="on")
+        self.assertEqual(self.calls(), [["w1:p1", "wt (feature/x)"]])
+
+    def test_outside_a_checkout_there_is_no_suffix(self):
+        self.set_panes([pane("w1:p1", "/opt")])
+        self.sync(branch="on")
+        self.assertEqual(self.calls(), [["w1:p1", "opt"]])
+
+    def test_long_branches_elide_from_the_right(self):
+        repo = self.make_repo("ref: refs/heads/feature/ABC-1234-add-a-very-long-thing")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", branch_max_len=16)
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo (feature/ABC-123…)"]])
+
+    def test_the_branch_shortens_the_path_not_the_total(self):
+        repo = self.make_repo("ref: refs/heads/main", name="a-rather-long-repository-name")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", max_len=20)
+        label = self.calls()[0][1]
+        self.assertEqual(len(label), 20)
+        self.assertTrue(label.startswith("…"))
+        self.assertTrue(label.endswith(" (main)"))
+
+    def test_the_path_keeps_room_when_the_branch_is_long(self):
+        repo = self.make_repo("ref: refs/heads/feature/ABC-1234-add-a-very-long-thing",
+                              name="a-rather-long-repository-name")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", max_len=20, branch_max_len=80)
+        label = self.calls()[0][1]
+        self.assertEqual(len(label), 20)
+        self.assertEqual(label, "…ry-name (feature/…)")
+
+    def test_a_branch_switch_relabels(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on")
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/dev\n")
+        self.set_panes([pane("w1:p1", str(repo), label="myrepo (main)")])
+        self.sync(branch="on")
+        self.assertEqual(self.calls()[-1], ["w1:p1", "myrepo (dev)"])
+
+    def test_custom_format_is_used(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", branch_format=" @ {branch}")
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo @ main"]])
+
+    def test_a_format_without_the_placeholder_falls_back(self):
+        os.environ["HERDR_PANE_PWD_BRANCH_FORMAT"] = " [oops]"
+        self.assertEqual(self.mod.load_config()["branch_format"], " ({branch})")
+
+
 class TestOwnership(Harness):
     def test_repeat_syncs_do_not_rename_again(self):
         self.set_panes([pane("w1:p1", "/tmp/alpha")])
