@@ -196,6 +196,18 @@ counts toward `MAX_LEN`, so a long branch shortens the path rather than
 growing the label; the path keeps at least 8 characters before the branch is
 cut further to fit.
 
+`BRANCH_FORMAT` accepts any text around `{branch}`, including Nerd Font
+glyphs if your terminal font has them. The git-branch icon is `U+F418`;
+type it into `config.env` directly:
+
+```
+BRANCH_FORMAT=" (<U+F418> {branch})"   # → ~/dev/herder-plugins/pwd (<icon> main)
+```
+
+Labels cannot be colored. Herdr draws a pane label as plain text in a single
+color, and ANSI escape codes show up literally rather than being interpreted,
+so the plugin strips control characters out of every label.
+
 Any key can also be set per-invocation as `HERDR_PANE_PWD_<KEY>`.
 
 ## Development

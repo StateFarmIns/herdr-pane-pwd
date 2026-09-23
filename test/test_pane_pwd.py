@@ -304,6 +304,18 @@ class TestTabLabels(Harness):
         self.sync(tab_labels="single", focused_style="short")
         self.assertEqual(self.tab_calls(), [["w1:t1", "~/dev/thing"]])
 
+    def test_a_single_pane_tab_shows_the_branch_even_when_focused_only(self):
+        # The tab name stands in for the focused view, so BRANCH=focused
+        # applies there even when the pane itself is not focused.
+        repo = Path(self.tmp.name) / "myrepo"
+        (repo / ".git").mkdir(parents=True)
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.set_tabs(self.tabs(("w1:t1", 1, "1", 1)))
+        self.sync(tab_labels="single", branch="focused")
+        self.assertEqual(self.tab_calls(), [["w1:t1", "myrepo (main)"]])
+        self.assertEqual(self.pane_calls(), [["w1:p1", "myrepo"]])
+
     def test_splitting_hands_the_tab_name_back_to_herdr(self):
         self.set_panes([pane("w1:p1", HOME + "/dev/thing", focused=True)])
         self.set_tabs(self.tabs(("w1:t1", 1, "1", 1)))
