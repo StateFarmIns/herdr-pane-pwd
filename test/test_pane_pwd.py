@@ -218,6 +218,35 @@ class TestBranch(Harness):
         self.sync(branch="on", branch_format=" @ {branch}")
         self.assertEqual(self.calls(), [["w1:p1", "myrepo @ main"]])
 
+    def test_an_escaped_glyph_matches_the_pasted_glyph(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", branch_format=" (\\uF418 {branch})")
+        escaped = self.calls()[-1][1]
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", branch_format=" (\uf418 {branch})")
+        self.assertEqual(escaped, "myrepo (\uf418 main)")
+        self.assertEqual(self.calls()[-1][1], escaped)
+
+    def test_long_escapes_reach_the_supplementary_planes(self):
+        os.environ["HERDR_PANE_PWD_BRANCH_FORMAT"] = " \\U000F062C {branch}"
+        self.assertEqual(self.mod.load_config()["branch_format"], " \U000F062C {branch}")
+
+    def test_an_escaped_control_character_is_still_stripped(self):
+        os.environ["HERDR_PANE_PWD_BRANCH_FORMAT"] = " \\u001b[32m{branch}"
+        self.assertEqual(self.mod.load_config()["branch_format"], " [32m{branch}")
+
+    def test_invalid_escapes_are_left_as_typed(self):
+        os.environ["HERDR_PANE_PWD_BRANCH_FORMAT"] = " \\uD800 \\U00110000 \\uZZZZ {branch}"
+        self.assertEqual(self.mod.load_config()["branch_format"],
+                         " \\uD800 \\U00110000 \\uZZZZ {branch}")
+
+    def test_escapes_are_read_from_config_env(self):
+        cfg_dir = Path(os.environ["HERDR_PLUGIN_CONFIG_DIR"])
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "config.env").write_text('BRANCH_FORMAT=" (\\uF418 {branch})"\n')
+        self.assertEqual(self.mod.load_config()["branch_format"], " (\uf418 {branch})")
+
     def test_a_format_without_the_placeholder_falls_back(self):
         os.environ["HERDR_PANE_PWD_BRANCH_FORMAT"] = " [oops]"
         self.assertEqual(self.mod.load_config()["branch_format"], " ({branch})")

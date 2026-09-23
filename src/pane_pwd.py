@@ -38,6 +38,8 @@ PANE_ID_RE = re.compile(r"^w[0-9A-Za-z]+:p[0-9A-Za-z]+$")
 
 CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
+UNICODE_ESCAPE_RE = re.compile(r"\\u([0-9A-Fa-f]{4})|\\U([0-9A-Fa-f]{8})")
+
 DEFAULTS = {
     # Poll interval. Herdr emits no cwd-change event, so this is the ceiling on
     # how stale a label can be after a plain `cd`.
@@ -187,9 +189,26 @@ def _truthy(raw):
     return str(raw).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _unescape(raw):
+    """Turn `\\uXXXX` and `\\UXXXXXXXX` into the characters they name.
+
+    Lets a config name a Nerd Font glyph by code point instead of pasting a
+    character that many editors and chat tools silently drop. Anything that is
+    not a valid code point is left as typed.
+    """
+    def replace(match):
+        code = int(match.group(1) or match.group(2), 16)
+        if code > 0x10FFFF or 0xD800 <= code <= 0xDFFF:
+            return match.group(0)
+        return chr(code)
+    return UNICODE_ESCAPE_RE.sub(replace, raw)
+
+
 def _branch_format(raw):
+    # Control characters are stripped after unescaping, so `\u001b` cannot
+    # smuggle an escape byte onto the border.
+    value = CONTROL_CHARS_RE.sub("", _unescape(raw))
     # Without the placeholder the branch would silently never appear.
-    value = CONTROL_CHARS_RE.sub("", raw)
     return value if "{branch}" in value else DEFAULT_BRANCH_FORMAT
 
 

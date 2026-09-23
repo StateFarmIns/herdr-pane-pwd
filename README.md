@@ -197,12 +197,16 @@ growing the label; the path keeps at least 8 characters before the branch is
 cut further to fit.
 
 `BRANCH_FORMAT` accepts any text around `{branch}`, including Nerd Font
-glyphs if your terminal font has them. The git-branch icon is `U+F418`;
-type it into `config.env` directly:
+glyphs if your terminal font has them. Paste the glyph itself, or name it by
+code point with `\uXXXX` (or `\UXXXXXXXX` above `U+FFFF`); both render the
+same. The git-branch icon is `U+F418`:
 
 ```
-BRANCH_FORMAT=" (<U+F418> {branch})"   # → ~/dev/herder-plugins/pwd (<icon> main)
+BRANCH_FORMAT=" (\uF418 {branch})"   # → ~/dev/herder-plugins/pwd (<git-branch icon> main)
 ```
+
+The escape is handy because many editors and chat tools silently drop
+private-use characters like Nerd Font glyphs when you copy them.
 
 Labels cannot be colored. Herdr draws a pane label as plain text in a single
 color, and ANSI escape codes show up literally rather than being interpreted,
