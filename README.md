@@ -32,7 +32,7 @@ inside the pane never sees it.
 Copy-paste these two lines. That is the whole installation.
 
 ```sh
-herdr plugin install <org>/herdr-pane-pwd
+herdr plugin install StateFarmIns/herdr-pane-pwd
 herdr plugin action invoke pane-pwd.start
 ```
 
@@ -224,7 +224,7 @@ it - `plugin link` points at the directory rather than copying it, so your
 edits are live:
 
 ```sh
-git clone https://github.com/<org>/herdr-pane-pwd.git
+git clone https://github.com/StateFarmIns/herdr-pane-pwd.git
 herdr plugin link "$PWD/herdr-pane-pwd"
 herdr plugin action invoke pane-pwd.start
 ```
