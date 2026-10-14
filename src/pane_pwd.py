@@ -38,6 +38,8 @@ PANE_ID_RE = re.compile(r"^w[0-9A-Za-z]+:p[0-9A-Za-z]+$")
 
 CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
+UNICODE_ESCAPE_RE = re.compile(r"\\u([0-9A-Fa-f]{4})|\\U([0-9A-Fa-f]{8})")
+
 DEFAULTS = {
     # Poll interval. Herdr emits no cwd-change event, so this is the ceiling on
     # how stale a label can be after a plain `cd`.
@@ -49,6 +51,12 @@ DEFAULTS = {
     "focused_style": "short",
     # Truncated from the left, keeping the most specific trailing components.
     "max_len": "40",
+    # Show the git branch after the path: off | on | focused.
+    "branch": "off",
+    # How the branch is appended; `{branch}` is replaced with its name.
+    "branch_format": " ({branch})",
+    # Truncated from the right, keeping the leading `feature/ABC-1234` part.
+    "branch_max_len": "20",
     # Literal text prepended after truncation, e.g. "> " or an icon.
     "prefix": "",
     # How $HOME itself is rendered.
@@ -67,6 +75,13 @@ DEFAULTS = {
 
 VALID_STYLES = ("basename", "repo", "short", "full")
 VALID_TAB_MODES = ("single", "always", "off")
+VALID_BRANCH_MODES = ("off", "on", "focused")
+
+DEFAULT_BRANCH_FORMAT = " ({branch})"
+
+# A path keeps at least this many characters before the branch is shortened
+# further to fit MAX_LEN, so a long branch cannot squeeze the path to nothing.
+MIN_PATH_LEN = 8
 
 
 class HerdrError(RuntimeError):
@@ -144,6 +159,9 @@ def load_config():
         "style": _one_of(values["style"], VALID_STYLES, "short"),
         "focused_style": _one_of(values["focused_style"], VALID_STYLES, "short"),
         "max_len": _clamp_int(values["max_len"], 4, 80, 40),
+        "branch": _one_of(values["branch"], VALID_BRANCH_MODES, "off"),
+        "branch_format": _branch_format(values["branch_format"]),
+        "branch_max_len": _clamp_int(values["branch_max_len"], 4, 80, 20),
         "prefix": CONTROL_CHARS_RE.sub("", values["prefix"]),
         "home_label": CONTROL_CHARS_RE.sub("", values["home_label"]) or "~",
         "respect_manual": _truthy(values["respect_manual"]),
@@ -169,6 +187,29 @@ def _one_of(raw, allowed, fallback):
 
 def _truthy(raw):
     return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _unescape(raw):
+    """Turn `\\uXXXX` and `\\UXXXXXXXX` into the characters they name.
+
+    Lets a config name a Nerd Font glyph by code point instead of pasting a
+    character that many editors and chat tools silently drop. Anything that is
+    not a valid code point is left as typed.
+    """
+    def replace(match):
+        code = int(match.group(1) or match.group(2), 16)
+        if code > 0x10FFFF or 0xD800 <= code <= 0xDFFF:
+            return match.group(0)
+        return chr(code)
+    return UNICODE_ESCAPE_RE.sub(replace, raw)
+
+
+def _branch_format(raw):
+    # Control characters are stripped after unescaping, so `\u001b` cannot
+    # smuggle an escape byte onto the border.
+    value = CONTROL_CHARS_RE.sub("", _unescape(raw))
+    # Without the placeholder the branch would silently never appear.
+    return value if "{branch}" in value else DEFAULT_BRANCH_FORMAT
 
 
 # --------------------------------------------------------------------------
@@ -260,22 +301,74 @@ def _collapse_home(path):
         return str(path)
 
 
-def _repo_label(path):
-    """`<repo>/<subpath>` when inside a git checkout, else None.
+def _checkout_root(path):
+    """The nearest directory at or above `path` holding a `.git` entry.
 
-    Walks for a `.git` entry rather than shelling out to git: this runs once
-    per pane per tick, and a subprocess per pane would dominate the cost.
+    Walks for `.git` rather than shelling out to git: this runs once per pane
+    per tick, and a subprocess per pane would dominate the cost.
     """
     for candidate in [path] + list(path.parents):
-        if not (candidate / ".git").exists():
-            continue
-        if candidate == path:
-            return candidate.name
-        return candidate.name + "/" + str(path.relative_to(candidate))
+        if (candidate / ".git").exists():
+            return candidate
     return None
 
 
-def render_label(cwd, style, cfg):
+def _repo_label(path):
+    """`<repo>/<subpath>` when inside a git checkout, else None."""
+    root = _checkout_root(path)
+    if root is None:
+        return None
+    if root == path:
+        return root.name
+    return root.name + "/" + str(path.relative_to(root))
+
+
+def _git_branch(path):
+    """The checked-out branch, a short commit hash when detached, else None.
+
+    Reads HEAD directly for the same reason `_checkout_root` avoids git. In a
+    worktree or submodule `.git` is a file holding `gitdir: <path>`, and HEAD
+    lives in that directory instead.
+    """
+    root = _checkout_root(path)
+    if root is None:
+        return None
+    dotgit = root / ".git"
+    try:
+        if dotgit.is_file():
+            pointer = dotgit.read_text(encoding="utf-8", errors="replace").strip()
+            if not pointer.startswith("gitdir:"):
+                return None
+            dotgit = root / pointer[len("gitdir:"):].strip()
+        head = (dotgit / "HEAD").read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    if head.startswith("ref:"):
+        ref = head[len("ref:"):].strip()
+        return ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
+    if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
+        return head[:7]
+    return None
+
+
+def _branch_suffix(path, text_len, cfg):
+    """The formatted branch suffix, shortened to leave the path some room."""
+    branch = _git_branch(path)
+    if not branch:
+        return ""
+    branch = CONTROL_CHARS_RE.sub("", branch)
+    overhead = len(cfg["branch_format"]) - len("{branch}")
+    room = cfg["max_len"] - min(text_len, MIN_PATH_LEN) - overhead
+    budget = min(cfg["branch_max_len"], room)
+    if budget < 2:
+        return ""  # not even one character plus "…" fits
+    if len(branch) > budget:
+        # Elide from the right: the leading `feature/ABC-1234` identifies it.
+        branch = branch[:budget - 1] + "…"
+    return cfg["branch_format"].replace("{branch}", branch)
+
+
+def render_label(cwd, style, cfg, focused=False):
     """Turn an absolute directory into the text drawn on the pane border."""
     try:
         path = Path(cwd)
@@ -305,12 +398,16 @@ def render_label(cwd, style, cfg):
     if not text:
         text = str(path)
 
-    budget = cfg["max_len"]
+    suffix = ""
+    if cfg["branch"] == "on" or (cfg["branch"] == "focused" and focused):
+        suffix = _branch_suffix(path, len(text), cfg)
+
+    budget = cfg["max_len"] - len(suffix)
     if len(text) > budget:
         # Elide from the left: the trailing components identify the folder.
         text = "…" + text[-(budget - 1):]
 
-    label = cfg["prefix"] + text
+    label = cfg["prefix"] + text + suffix
     # A leading dash would be read as a flag by `herdr pane rename`.
     label = label.lstrip("-").strip()
     return label or None
@@ -422,8 +519,9 @@ def _sync_locked(cfg):
         if not cwd:
             continue
 
-        style = cfg["focused_style"] if pane.get("focused") else cfg["style"]
-        desired = render_label(cwd, style, cfg)
+        focused = bool(pane.get("focused"))
+        style = cfg["focused_style"] if focused else cfg["style"]
+        desired = render_label(cwd, style, cfg, focused)
         if desired is None:
             continue
 
@@ -513,7 +611,7 @@ def _sync_tabs(cfg, panes):
             cwd = source.get("foreground_cwd") or source.get("cwd")
             if not cwd:
                 continue
-            desired = render_label(cwd, cfg["focused_style"], cfg)
+            desired = render_label(cwd, cfg["focused_style"], cfg, focused=True)
             if desired is None:
                 continue
 

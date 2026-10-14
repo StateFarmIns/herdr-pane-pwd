@@ -76,8 +76,8 @@ an interactive shell's.
   changes that. `TAB_LABELS=single` (the default) covers this by putting the
   path in the tab name whenever a tab holds exactly one pane, and handing the
   tab back to its generated name the moment you split it.
-- **Polling, not events.** A `cd` shows up within `INTERVAL_MS` (1s default),
-  not instantly.
+- **Polling, not events.** A `cd` or `git switch` shows up within
+  `INTERVAL_MS` (1s default), not instantly.
 - **It uses the pane *label*, the same field `herdr pane rename` writes.** See
   ownership below.
 
@@ -147,10 +147,13 @@ herdr plugin action invoke pane-pwd.start
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `INTERVAL_MS` | `1000` | Poll interval; the worst-case lag after a `cd`. |
+| `INTERVAL_MS` | `1000` | Poll interval; the worst-case lag after a `cd` or branch switch. |
 | `STYLE` | `short` | Every pane: `basename`, `repo`, `short`, or `full`. |
 | `FOCUSED_STYLE` | `short` | Same choices, for the focused pane only. |
 | `MAX_LEN` | `40` | Label cap; longer labels elide from the left with `…`. |
+| `BRANCH` | `off` | Git branch after the path: `off`, `on`, or `focused`. |
+| `BRANCH_FORMAT` | ` ({branch})` | How the branch is appended; `{branch}` is the name. |
+| `BRANCH_MAX_LEN` | `20` | Branch cap; longer names elide from the right with `…`. |
 | `PREFIX` | *(empty)* | Literal text in front of every label. |
 | `HOME_LABEL` | `~` | How `$HOME` itself renders. |
 | `RESPECT_MANUAL` | `true` | Leave hand-renamed panes alone. |
@@ -172,6 +175,45 @@ The styles, for `/Users/you/dev/herder-plugins/pwd` inside the
 | `basename` | `pwd` |
 | `repo` | `herder-plugins/pwd` |
 | `full` | `/Users/you/dev/herder-plugins/pwd` |
+
+### Git branch
+
+`BRANCH=on` appends the checked-out branch to every label, and
+`BRANCH=focused` only to the focused pane's. Tab names count as focused, so
+they show the branch under either setting. It is read from `.git/HEAD`
+directly, worktrees and submodules included, so it adds no `git` process per
+pane per tick. A detached HEAD shows the 7-character commit hash.
+
+```
+BRANCH=on
+MAX_LEN=40
+BRANCH_MAX_LEN=20
+# on feature/ABC-1234-add-login:
+# → …rder-plugins/pwd (feature/ABC-1234-ad…)
+```
+
+The branch is cut from the right, keeping the part that identifies it. It
+counts toward `MAX_LEN`, so a long branch shortens the path rather than
+growing the label; the path keeps at least 8 characters before the branch is
+cut further to fit. If `MAX_LEN` leaves no room for even one character and
+`…`, the branch is left off.
+
+`BRANCH_FORMAT` accepts any text around `{branch}`, including Nerd Font
+glyphs if your terminal font has them. Paste the glyph itself, or name it by
+code point with `\uXXXX` (or `\UXXXXXXXX` above `U+FFFF`); both render the
+same. A format without `{branch}` is ignored in favour of the default. The
+git-branch icon is `U+F418`:
+
+```
+BRANCH_FORMAT=" (\uF418 {branch})"   # → ~/dev/herder-plugins/pwd (<git-branch icon> main)
+```
+
+The escape is handy because many editors and chat tools silently drop
+private-use characters like Nerd Font glyphs when you copy them.
+
+Labels cannot be colored. Herdr draws a pane label as plain text in a single
+color, and ANSI escape codes show up literally rather than being interpreted,
+so the plugin strips control characters out of every label.
 
 Any key can also be set per-invocation as `HERDR_PANE_PWD_<KEY>`.
 

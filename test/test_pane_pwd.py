@@ -131,6 +131,127 @@ class TestRendering(Harness):
         self.assertEqual(self.calls(), [["w1:p1", "beta"]])
 
 
+class TestBranch(Harness):
+    def make_repo(self, head, name="myrepo"):
+        repo = Path(self.tmp.name) / name
+        (repo / ".git").mkdir(parents=True)
+        (repo / ".git" / "HEAD").write_text(head + "\n")
+        return repo
+
+    def test_branch_is_off_by_default(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync()
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo"]])
+
+    def test_branch_on_appends_the_branch(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on")
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo (main)"]])
+
+    def test_branch_focused_only_labels_the_focused_pane(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo), focused=True),
+                        pane("w1:p2", str(repo))])
+        self.sync(branch="focused")
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo (main)"], ["w1:p2", "myrepo"]])
+
+    def test_detached_head_shows_a_short_hash(self):
+        repo = self.make_repo("0123456789abcdef0123456789abcdef01234567")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on")
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo (0123456)"]])
+
+    def test_worktree_gitdir_file_is_followed(self):
+        real = Path(self.tmp.name) / "main-checkout" / ".git" / "worktrees" / "wt"
+        real.mkdir(parents=True)
+        (real / "HEAD").write_text("ref: refs/heads/feature/x\n")
+        wt = Path(self.tmp.name) / "wt"
+        wt.mkdir()
+        (wt / ".git").write_text("gitdir: %s\n" % real)
+        self.set_panes([pane("w1:p1", str(wt))])
+        self.sync(branch="on")
+        self.assertEqual(self.calls(), [["w1:p1", "wt (feature/x)"]])
+
+    def test_outside_a_checkout_there_is_no_suffix(self):
+        self.set_panes([pane("w1:p1", "/opt")])
+        self.sync(branch="on")
+        self.assertEqual(self.calls(), [["w1:p1", "opt"]])
+
+    def test_long_branches_elide_from_the_right(self):
+        repo = self.make_repo("ref: refs/heads/feature/ABC-1234-add-a-very-long-thing")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", branch_max_len=16)
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo (feature/ABC-123…)"]])
+
+    def test_the_branch_shortens_the_path_not_the_total(self):
+        repo = self.make_repo("ref: refs/heads/main", name="a-rather-long-repository-name")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", max_len=20)
+        label = self.calls()[0][1]
+        self.assertEqual(len(label), 20)
+        self.assertTrue(label.startswith("…"))
+        self.assertTrue(label.endswith(" (main)"))
+
+    def test_the_path_keeps_room_when_the_branch_is_long(self):
+        repo = self.make_repo("ref: refs/heads/feature/ABC-1234-add-a-very-long-thing",
+                              name="a-rather-long-repository-name")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", max_len=20, branch_max_len=80)
+        label = self.calls()[0][1]
+        self.assertEqual(len(label), 20)
+        self.assertEqual(label, "…ry-name (feature/…)")
+
+    def test_a_branch_switch_relabels(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on")
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/dev\n")
+        self.set_panes([pane("w1:p1", str(repo), label="myrepo (main)")])
+        self.sync(branch="on")
+        self.assertEqual(self.calls()[-1], ["w1:p1", "myrepo (dev)"])
+
+    def test_custom_format_is_used(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", branch_format=" @ {branch}")
+        self.assertEqual(self.calls(), [["w1:p1", "myrepo @ main"]])
+
+    def test_an_escaped_glyph_matches_the_pasted_glyph(self):
+        repo = self.make_repo("ref: refs/heads/main")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", branch_format=" (\\uF418 {branch})")
+        escaped = self.calls()[-1][1]
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.sync(branch="on", branch_format=" (\uf418 {branch})")
+        self.assertEqual(escaped, "myrepo (\uf418 main)")
+        self.assertEqual(self.calls()[-1][1], escaped)
+
+    def test_long_escapes_reach_the_supplementary_planes(self):
+        os.environ["HERDR_PANE_PWD_BRANCH_FORMAT"] = " \\U000F062C {branch}"
+        self.assertEqual(self.mod.load_config()["branch_format"], " \U000F062C {branch}")
+
+    def test_an_escaped_control_character_is_still_stripped(self):
+        os.environ["HERDR_PANE_PWD_BRANCH_FORMAT"] = " \\u001b[32m{branch}"
+        self.assertEqual(self.mod.load_config()["branch_format"], " [32m{branch}")
+
+    def test_invalid_escapes_are_left_as_typed(self):
+        os.environ["HERDR_PANE_PWD_BRANCH_FORMAT"] = " \\uD800 \\U00110000 \\uZZZZ {branch}"
+        self.assertEqual(self.mod.load_config()["branch_format"],
+                         " \\uD800 \\U00110000 \\uZZZZ {branch}")
+
+    def test_escapes_are_read_from_config_env(self):
+        cfg_dir = Path(os.environ["HERDR_PLUGIN_CONFIG_DIR"])
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "config.env").write_text('BRANCH_FORMAT=" (\\uF418 {branch})"\n')
+        self.assertEqual(self.mod.load_config()["branch_format"], " (\uf418 {branch})")
+
+    def test_a_format_without_the_placeholder_falls_back(self):
+        os.environ["HERDR_PANE_PWD_BRANCH_FORMAT"] = " [oops]"
+        self.assertEqual(self.mod.load_config()["branch_format"], " ({branch})")
+
+
 class TestOwnership(Harness):
     def test_repeat_syncs_do_not_rename_again(self):
         self.set_panes([pane("w1:p1", "/tmp/alpha")])
@@ -211,6 +332,18 @@ class TestTabLabels(Harness):
         self.set_tabs(self.tabs(("w1:t1", 1, "1", 1)))
         self.sync(tab_labels="single", focused_style="short")
         self.assertEqual(self.tab_calls(), [["w1:t1", "~/dev/thing"]])
+
+    def test_a_single_pane_tab_shows_the_branch_even_when_focused_only(self):
+        # The tab name stands in for the focused view, so BRANCH=focused
+        # applies there even when the pane itself is not focused.
+        repo = Path(self.tmp.name) / "myrepo"
+        (repo / ".git").mkdir(parents=True)
+        (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        self.set_panes([pane("w1:p1", str(repo))])
+        self.set_tabs(self.tabs(("w1:t1", 1, "1", 1)))
+        self.sync(tab_labels="single", branch="focused")
+        self.assertEqual(self.tab_calls(), [["w1:t1", "myrepo (main)"]])
+        self.assertEqual(self.pane_calls(), [["w1:p1", "myrepo"]])
 
     def test_splitting_hands_the_tab_name_back_to_herdr(self):
         self.set_panes([pane("w1:p1", HOME + "/dev/thing", focused=True)])
